@@ -40,6 +40,7 @@ export function resolvePlayQuery(raw) {
       '--print', 'webpage_url',
       '--no-warnings',
       '--extractor-args', 'youtube:player_client=android_vr,tv_embedded',
+      ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
     ]);
     let out = '';
     let err = '';

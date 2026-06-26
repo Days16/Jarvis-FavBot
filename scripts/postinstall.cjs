@@ -35,40 +35,38 @@ try {
     console.log('[postinstall] Parche 2: eliminado --no-call-home.');
   }
 
-  // 3. Añadir player_client=ios,tv_embedded en resolve() para bypassar bot detection
-  const RESOLVE_SIMULATE = `      simulate: true
+  // 3. Añadir player_client + cookies en resolve()
+  const RESOLVE_TARGET = `      simulate: true
     }).catch((e2) => {
       throw new import_distube.DisTubeError("YTDLP_ERROR", \`\${e2.stderr || e2}\`);
     });`;
-  if (code.includes(RESOLVE_SIMULATE)) {
-    code = code.replace(
-      RESOLVE_SIMULATE,
-      `      simulate: true,
+  const RESOLVE_PATCHED = `      simulate: true,
       extractorArgs: "youtube:player_client=android_vr,tv_embedded",
+      ...(process.env.YTDLP_COOKIES ? { cookies: process.env.YTDLP_COOKIES } : {}),
     }).catch((e2) => {
       throw new import_distube.DisTubeError("YTDLP_ERROR", \`\${e2.stderr || e2}\`);
-    });`,
-    );
+    });`;
+  if (code.includes(RESOLVE_TARGET)) {
+    code = code.replace(RESOLVE_TARGET, RESOLVE_PATCHED);
     changed = true;
-    console.log('[postinstall] Parche 3: player_client=ios,tv_embedded en resolve().');
+    console.log('[postinstall] Parche 3: player_client + cookies en resolve().');
   }
 
-  // 4. Añadir player_client en getStreamURL()
-  const STREAM_FORMAT = `      format: "ba/ba*"
+  // 4. Añadir player_client + cookies en getStreamURL()
+  const STREAM_TARGET = `      format: "ba/ba*"
     }).catch((e2) => {
       throw new import_distube.DisTubeError("YTDLP_ERROR", \`\${e2.stderr || e2}\`);
     });`;
-  if (code.includes(STREAM_FORMAT)) {
-    code = code.replace(
-      STREAM_FORMAT,
-      `      format: "ba/ba*",
+  const STREAM_PATCHED = `      format: "ba/ba*",
       extractorArgs: "youtube:player_client=android_vr,tv_embedded",
+      ...(process.env.YTDLP_COOKIES ? { cookies: process.env.YTDLP_COOKIES } : {}),
     }).catch((e2) => {
       throw new import_distube.DisTubeError("YTDLP_ERROR", \`\${e2.stderr || e2}\`);
-    });`,
-    );
+    });`;
+  if (code.includes(STREAM_TARGET)) {
+    code = code.replace(STREAM_TARGET, STREAM_PATCHED);
     changed = true;
-    console.log('[postinstall] Parche 4: player_client=ios,tv_embedded en getStreamURL().');
+    console.log('[postinstall] Parche 4: player_client + cookies en getStreamURL().');
   }
 
   if (changed) {
