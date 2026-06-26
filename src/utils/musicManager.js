@@ -39,6 +39,7 @@ export function resolvePlayQuery(raw) {
       `ytsearch1:${raw}`,
       '--print', 'webpage_url',
       '--no-warnings',
+      '--extractor-args', 'youtube:player_client=ios,tv_embedded',
     ]);
     let out = '';
     let err = '';
