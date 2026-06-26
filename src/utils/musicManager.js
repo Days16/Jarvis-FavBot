@@ -3,6 +3,7 @@ import { YtDlpPlugin } from '@distube/yt-dlp';
 import { EmbedBuilder } from 'discord.js';
 import { spawn } from 'child_process';
 import { join } from 'path';
+import { existsSync } from 'fs';
 import { logger } from './logger.js';
 import ffmpegPath from 'ffmpeg-static';
 
@@ -11,6 +12,27 @@ const YTDLP_BIN = process.env.YTDLP_PATH || join(
   'node_modules/@distube/yt-dlp/bin',
   process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp',
 );
+
+// Detecta cookies.txt automáticamente y exporta la ruta absoluta para el plugin
+const COOKIES_PATH = (() => {
+  const envVal = process.env.YTDLP_COOKIES;
+  if (envVal) {
+    const abs = envVal.startsWith('/') || /^[A-Za-z]:\\/.test(envVal)
+      ? envVal
+      : join(process.cwd(), envVal);
+    if (existsSync(abs)) return abs;
+  }
+  const auto = join(process.cwd(), 'cookies.txt');
+  if (existsSync(auto)) return auto;
+  return null;
+})();
+
+if (COOKIES_PATH) {
+  process.env.YTDLP_COOKIES = COOKIES_PATH; // el parche del plugin lo usa
+  logger.info(`[Music] Cookies de YouTube: ${COOKIES_PATH}`);
+} else {
+  logger.warn('[Music] cookies.txt no encontrado — algunas canciones pueden fallar.');
+}
 
 // Limpia URLs de YouTube Radio/Mix (list=RD...) dejando solo el video
 function cleanYouTubeURL(url) {
@@ -35,13 +57,15 @@ export function resolvePlayQuery(raw) {
   } catch { /* not a URL */ }
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_BIN, [
+    const args = [
       `ytsearch1:${raw}`,
       '--print', 'webpage_url',
       '--no-warnings',
       '--extractor-args', 'youtube:player_client=android_vr,tv_embedded',
-      ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
-    ]);
+    ];
+    if (COOKIES_PATH) args.push('--cookies', COOKIES_PATH);
+
+    const proc = spawn(YTDLP_BIN, args);
     let out = '';
     let err = '';
     proc.stdout.on('data', d => { out += d; });
@@ -81,7 +105,6 @@ export function initMusic(client) {
         { name: '👤 Solicitado por', value: requestedBy?.toString() ?? 'Desconocido', inline: true },
       )
       .setThumbnail(song.thumbnail ?? null);
-
     queue.textChannel?.send({ embeds: [embed] }).catch(() => {});
   });
 
