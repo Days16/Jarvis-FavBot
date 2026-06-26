@@ -1,25 +1,52 @@
-import { DisTube } from 'distube';
+import { DisTube, Song, Playlist } from 'distube';
 import { YtDlpPlugin } from '@distube/yt-dlp';
 import { EmbedBuilder } from 'discord.js';
 import { spawn } from 'child_process';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { logger } from './logger.js';
 import ffmpegPath from 'ffmpeg-static';
 
-const YTDLP_BIN = process.env.YTDLP_PATH || join(
-  process.cwd(),
-  'node_modules/@distube/yt-dlp/bin',
-  process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp',
-);
+function findYtDlpBin() {
+  if (process.env.YTDLP_PATH) return process.env.YTDLP_PATH;
 
-// Detecta cookies.txt automáticamente y exporta la ruta absoluta para el plugin
+  const candidates = [
+    join(process.cwd(), process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'),
+    join(process.cwd(), 'node_modules/@distube/yt-dlp/bin', process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'),
+  ];
+
+  return candidates.find(existsSync) ?? 'yt-dlp';
+}
+
+const YTDLP_BIN = findYtDlpBin();
+
+function materializeCookieContent(value, encoding) {
+  if (!value) return null;
+
+  const dir = join(tmpdir(), 'jarvis-favbot');
+  mkdirSync(dir, { recursive: true });
+
+  const path = join(dir, 'youtube-cookies.txt');
+  const content = encoding === 'base64'
+    ? Buffer.from(value, 'base64').toString('utf8')
+    : value.replace(/\\n/g, '\n');
+
+  writeFileSync(path, content, { mode: 0o600 });
+  return path;
+}
+
+// Detecta cookies.txt y lo expone como ruta absoluta
 const COOKIES_PATH = (() => {
+  const fromBase64 = materializeCookieContent(process.env.YTDLP_COOKIES_BASE64, 'base64');
+  if (fromBase64) return fromBase64;
+
+  const fromContent = materializeCookieContent(process.env.YTDLP_COOKIES_CONTENT);
+  if (fromContent) return fromContent;
+
   const envVal = process.env.YTDLP_COOKIES;
   if (envVal) {
-    const abs = envVal.startsWith('/') || /^[A-Za-z]:\\/.test(envVal)
-      ? envVal
-      : join(process.cwd(), envVal);
+    const abs = /^([A-Za-z]:\\|\/)/.test(envVal) ? envVal : join(process.cwd(), envVal);
     if (existsSync(abs)) return abs;
   }
   const auto = join(process.cwd(), 'cookies.txt');
@@ -28,10 +55,101 @@ const COOKIES_PATH = (() => {
 })();
 
 if (COOKIES_PATH) {
-  process.env.YTDLP_COOKIES = COOKIES_PATH; // el parche del plugin lo usa
+  process.env.YTDLP_COOKIES = COOKIES_PATH;
   logger.info(`[Music] Cookies de YouTube: ${COOKIES_PATH}`);
 } else {
   logger.warn('[Music] cookies.txt no encontrado — algunas canciones pueden fallar.');
+}
+
+function buildYtDlpArgs(url, options = {}) {
+  const args = [
+    url,
+    '--dump-single-json',
+    '--no-warnings',
+    '--prefer-free-formats',
+    '--skip-download',
+    '--simulate',
+    '--extractor-args',
+    'youtube:player_client=android_vr,tv_embedded',
+  ];
+
+  if (options.format) args.push('--format', options.format);
+  if (COOKIES_PATH) args.push('--cookies', COOKIES_PATH);
+
+  return args;
+}
+
+function runYtDlpJson(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_BIN, buildYtDlpArgs(url, options), { windowsHide: true });
+    let out = '';
+    let err = '';
+
+    proc.stdout.on('data', d => { out += d; });
+    proc.stderr.on('data', d => { err += d; });
+    proc.on('close', code => {
+      if (code !== 0) {
+        reject(new Error(err.trim() || out.trim() || `yt-dlp salio con codigo ${code}`));
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(out));
+      } catch (parseErr) {
+        reject(new Error(`yt-dlp no devolvio JSON valido: ${parseErr.message}`));
+      }
+    });
+    proc.on('error', reject);
+  });
+}
+
+// Construye un objeto Song de DisTube desde el JSON de yt-dlp
+function makeSong(plugin, info, options) {
+  return new Song({
+    plugin,
+    source:        info.extractor || 'youtube',
+    playFromSource: true,
+    id:            info.id,
+    name:          info.title || info.fulltitle || 'Desconocido',
+    url:           info.webpage_url || info.original_url,
+    isLive:        !!info.is_live,
+    thumbnail:     info.thumbnail ?? info.thumbnails?.[0]?.url ?? null,
+    duration:      info.is_live ? 0 : (info.duration ?? 0),
+    uploader:      { name: info.uploader ?? null, url: info.uploader_url ?? null },
+    views:         info.view_count  ?? 0,
+    likes:         info.like_count  ?? 0,
+    dislikes:      info.dislike_count ?? 0,
+    reposts:       info.repost_count ?? 0,
+    ageRestricted: Boolean(info.age_limit) && info.age_limit >= 18,
+  }, options);
+}
+
+// Parchea el plugin en tiempo de ejecución para inyectar nuestros flags
+// (no depende del postinstall, funciona en cualquier entorno)
+function patchYtDlpPlugin(plugin) {
+  plugin.resolve = async function(url, options) {
+    const info = await runYtDlpJson(url).catch(e => { throw new Error(String(e)); });
+
+    if (Array.isArray(info.entries)) {
+      if (!info.entries.length) throw new Error('La playlist está vacía.');
+      return new Playlist({
+        source:    info.extractor,
+        songs:     info.entries.map(i => makeSong(plugin, i, options)),
+        id:        String(info.id),
+        name:      info.title,
+        url:       info.webpage_url,
+        thumbnail: info.thumbnails?.[0]?.url ?? null,
+      }, options);
+    }
+    return makeSong(plugin, info, options);
+  };
+
+  plugin.getStreamURL = async function(song) {
+    if (!song.url) throw new Error('URL de canción inválida.');
+    const info = await runYtDlpJson(song.url, { format: 'ba/ba*' }).catch(e => { throw new Error(String(e)); });
+    if (Array.isArray(info.entries)) throw new Error('No se puede reproducir una playlist completa directamente.');
+    return info.url;
+  };
 }
 
 // Limpia URLs de YouTube Radio/Mix (list=RD...) dejando solo el video
@@ -39,7 +157,7 @@ function cleanYouTubeURL(url) {
   try {
     const u = new URL(url);
     if (u.hostname.includes('youtube.com') && u.searchParams.has('v')) {
-      const list = u.searchParams.get('list') ?? '';
+      const list    = u.searchParams.get('list') ?? '';
       const isRadio = u.searchParams.get('start_radio') === '1' || list.startsWith('RD');
       if (isRadio) return `https://www.youtube.com/watch?v=${u.searchParams.get('v')}`;
     }
@@ -65,7 +183,7 @@ export function resolvePlayQuery(raw) {
     ];
     if (COOKIES_PATH) args.push('--cookies', COOKIES_PATH);
 
-    const proc = spawn(YTDLP_BIN, args);
+    const proc = spawn(YTDLP_BIN, args, { windowsHide: true });
     let out = '';
     let err = '';
     proc.stdout.on('data', d => { out += d; });
@@ -86,11 +204,14 @@ export function getDistube() {
 }
 
 export function initMusic(client) {
+  const ytdlpPlugin = new YtDlpPlugin({ update: process.platform !== 'win32' });
+  patchYtDlpPlugin(ytdlpPlugin); // ← inyecta cookies + player_client en runtime
+
   distube = new DisTube(client, {
     ffmpeg: { path: ffmpegPath },
     emitAddSongWhenCreatingQueue: false,
     emitAddListWhenCreatingQueue: false,
-    plugins: [new YtDlpPlugin({ update: process.platform !== 'win32' })],
+    plugins: [ytdlpPlugin],
   });
 
   distube.on('playSong', (queue, song) => {
@@ -100,9 +221,9 @@ export function initMusic(client) {
       .setTitle('🎵 Reproduciendo ahora')
       .setDescription(`[${song.name}](${song.url})`)
       .addFields(
-        { name: '⏱️ Duración', value: song.formattedDuration ?? '0:00', inline: true },
-        { name: '🔊 Volumen', value: `${queue.volume}%`, inline: true },
-        { name: '👤 Solicitado por', value: requestedBy?.toString() ?? 'Desconocido', inline: true },
+        { name: '⏱️ Duración',       value: song.formattedDuration ?? '0:00', inline: true },
+        { name: '🔊 Volumen',         value: `${queue.volume}%`,               inline: true },
+        { name: '👤 Solicitado por',  value: requestedBy?.toString() ?? 'Desconocido', inline: true },
       )
       .setThumbnail(song.thumbnail ?? null);
     queue.textChannel?.send({ embeds: [embed] }).catch(() => {});

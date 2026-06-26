@@ -8,8 +8,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "deploy": "node deploy-commands.js",
-    "deploy:global": "node deploy-commands.js --global",
-    "postinstall": "node scripts/postinstall.cjs"
+    "deploy:global": "node deploy-commands.js --global"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
