@@ -44,7 +44,7 @@ try {
     code = code.replace(
       RESOLVE_SIMULATE,
       `      simulate: true,
-      extractorArgs: "youtube:player_client=ios,tv_embedded",
+      extractorArgs: "youtube:player_client=android_vr,tv_embedded",
     }).catch((e2) => {
       throw new import_distube.DisTubeError("YTDLP_ERROR", \`\${e2.stderr || e2}\`);
     });`,
@@ -62,7 +62,7 @@ try {
     code = code.replace(
       STREAM_FORMAT,
       `      format: "ba/ba*",
-      extractorArgs: "youtube:player_client=ios,tv_embedded",
+      extractorArgs: "youtube:player_client=android_vr,tv_embedded",
     }).catch((e2) => {
       throw new import_distube.DisTubeError("YTDLP_ERROR", \`\${e2.stderr || e2}\`);
     });`,
