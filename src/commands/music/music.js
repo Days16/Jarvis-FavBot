@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
 import { RepeatMode } from 'distube';
 import { errorEmbed, successEmbed } from '../../utils/embedBuilder.js';
-import { getDistube, resolvePlayQuery } from '../../utils/musicManager.js';
+import { getDistube, getMusicDiagnostics, resolvePlayQuery } from '../../utils/musicManager.js';
 import { getGuild, ensureGuild, updateGuild } from '../../models/Guild.js';
 
 function formatDuration(seconds) {
@@ -37,6 +37,10 @@ export default {
     .addSubcommand(s => s.setName('resume').setDescription('Reanuda la reproducción pausada'))
     .addSubcommand(s => s.setName('queue').setDescription('Muestra la cola de reproducción'))
     .addSubcommand(s => s.setName('nowplaying').setDescription('Muestra la canción que suena ahora'))
+
+    .addSubcommand(s => s
+      .setName('diagnostico')
+      .setDescription('Muestra el estado de yt-dlp y cookies de YouTube'))
 
     .addSubcommand(s => s
       .setName('volume')
@@ -131,6 +135,21 @@ export default {
     }
 
     // ── comprobación de canal de texto ────────────────────────
+    if (sub === 'diagnostico') {
+      const diag = getMusicDiagnostics();
+      return interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(diag.cookiesDetected ? 0x57f287 : 0xed4245)
+          .setTitle('Diagnostico de musica')
+          .addFields(
+            { name: 'yt-dlp', value: `\`${diag.ytdlpBin}\``, inline: false },
+            { name: 'Cookies', value: diag.cookiesDetected ? 'Detectadas' : 'No detectadas', inline: true },
+            { name: 'Origen', value: `\`${diag.cookieSource}\``, inline: true },
+          )],
+        flags: 64,
+      });
+    }
+
     const guildData = await getGuild(interaction.guild.id);
     const musicChannelId = guildData?.channels?.music;
     if (musicChannelId && interaction.channel.id !== musicChannelId) {

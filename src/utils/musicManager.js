@@ -20,6 +20,7 @@ function findYtDlpBin() {
 }
 
 const YTDLP_BIN = findYtDlpBin();
+let cookieSource = 'none';
 
 function materializeCookieContent(value, encoding) {
   if (!value) return null;
@@ -36,21 +37,44 @@ function materializeCookieContent(value, encoding) {
   return path;
 }
 
+function looksLikeCookieContent(value) {
+  return value.includes('Netscape HTTP Cookie File') || value.includes('\t.youtube.com\t') || value.includes('\\t.youtube.com\\t');
+}
+
 // Detecta cookies.txt y lo expone como ruta absoluta
 const COOKIES_PATH = (() => {
   const fromBase64 = materializeCookieContent(process.env.YTDLP_COOKIES_BASE64, 'base64');
-  if (fromBase64) return fromBase64;
+  if (fromBase64) {
+    cookieSource = 'YTDLP_COOKIES_BASE64';
+    return fromBase64;
+  }
 
   const fromContent = materializeCookieContent(process.env.YTDLP_COOKIES_CONTENT);
-  if (fromContent) return fromContent;
+  if (fromContent) {
+    cookieSource = 'YTDLP_COOKIES_CONTENT';
+    return fromContent;
+  }
 
   const envVal = process.env.YTDLP_COOKIES;
   if (envVal) {
     const abs = /^([A-Za-z]:\\|\/)/.test(envVal) ? envVal : join(process.cwd(), envVal);
-    if (existsSync(abs)) return abs;
+    if (existsSync(abs)) {
+      cookieSource = 'YTDLP_COOKIES';
+      return abs;
+    }
+    if (looksLikeCookieContent(envVal)) {
+      const fromEnvContent = materializeCookieContent(envVal);
+      if (fromEnvContent) {
+        cookieSource = 'YTDLP_COOKIES';
+        return fromEnvContent;
+      }
+    }
   }
   const auto = join(process.cwd(), 'cookies.txt');
-  if (existsSync(auto)) return auto;
+  if (existsSync(auto)) {
+    cookieSource = 'cookies.txt';
+    return auto;
+  }
   return null;
 })();
 
@@ -103,6 +127,26 @@ function runYtDlpJson(url, options = {}) {
   });
 }
 
+function normalizeYtDlpError(error) {
+  const message = error?.message ?? String(error);
+  if (message.includes('Sign in to confirm') || message.includes('--cookies')) {
+    return new Error(
+      'YouTube esta bloqueando la extraccion. En Render falta una cookie valida o esta caducada. ' +
+      'Configura YTDLP_COOKIES_BASE64 con cookies nuevas exportadas de YouTube y redeploy.',
+    );
+  }
+  return error;
+}
+
+export function getMusicDiagnostics() {
+  return {
+    ytdlpBin: YTDLP_BIN,
+    cookiesDetected: Boolean(COOKIES_PATH),
+    cookieSource,
+    cookiesPath: COOKIES_PATH ? '[configured]' : null,
+  };
+}
+
 // Construye un objeto Song de DisTube desde el JSON de yt-dlp
 function makeSong(plugin, info, options) {
   return new Song({
@@ -128,7 +172,7 @@ function makeSong(plugin, info, options) {
 // (no depende del postinstall, funciona en cualquier entorno)
 function patchYtDlpPlugin(plugin) {
   plugin.resolve = async function(url, options) {
-    const info = await runYtDlpJson(url).catch(e => { throw new Error(String(e)); });
+    const info = await runYtDlpJson(url).catch(e => { throw normalizeYtDlpError(e); });
 
     if (Array.isArray(info.entries)) {
       if (!info.entries.length) throw new Error('La playlist está vacía.');
@@ -146,7 +190,7 @@ function patchYtDlpPlugin(plugin) {
 
   plugin.getStreamURL = async function(song) {
     if (!song.url) throw new Error('URL de canción inválida.');
-    const info = await runYtDlpJson(song.url, { format: 'ba/ba*' }).catch(e => { throw new Error(String(e)); });
+    const info = await runYtDlpJson(song.url, { format: 'ba/ba*' }).catch(e => { throw normalizeYtDlpError(e); });
     if (Array.isArray(info.entries)) throw new Error('No se puede reproducir una playlist completa directamente.');
     return info.url;
   };
