@@ -11,12 +11,11 @@ plugins:
     clients:
       - MUSIC
       - ANDROID_VR
-      - TV_EMBEDDED
       - WEB
 
 lavalink:
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.11.5"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       repository: "https://maven.lavalink.dev/releases"
   server:
     password: "${LAVALINK_PASS:M1C0ntr4s3n4}"

@@ -1,5 +1,6 @@
 import { Shoukaku, Connectors } from 'shoukaku';
 import { EmbedBuilder } from 'discord.js';
+import axios from 'axios';
 import { getConfig } from '../models/BotConfig.js';
 import { logger } from './logger.js';
 
@@ -108,6 +109,29 @@ function _leaveAndClean(guildId) {
   try { shoukaku?.leaveVoiceChannel(guildId); } catch { /* noop */ }
 }
 
+// Espera hasta que Lavalink responda por HTTP antes de abrir el WebSocket
+async function awaitLavalinkReady(node, maxWaitMs = 120_000) {
+  const proto = node.secure ? 'https' : 'http';
+  const url   = `${proto}://${node.url}/version`;
+  const start = Date.now();
+  let attempt = 0;
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await axios.get(url, { headers: { Authorization: node.auth }, timeout: 10_000 });
+      if (res.status === 200) {
+        logger.info(`[Lavalink] Servidor responde (intento ${attempt + 1}): v${res.data?.version?.semver ?? '?'} ✓`);
+        return true;
+      }
+    } catch {
+      attempt++;
+      logger.info(`[Lavalink] Esperando que Lavalink arranque… (${attempt})`);
+      await new Promise(r => setTimeout(r, 10_000));
+    }
+  }
+  logger.warn('[Lavalink] No respondió en 2 min — shoukaku intentará conectar igualmente.');
+  return false;
+}
+
 // ── API pública ───────────────────────────────────────────────────────
 export async function initMusic(client) {
   const nodes = await getNodeConfig();
@@ -116,9 +140,12 @@ export async function initMusic(client) {
     return null;
   }
 
+  // Esperar a que Lavalink esté disponible (maneja cold-start de Render)
+  await awaitLavalinkReady(nodes[0]);
+
   shoukaku = new Shoukaku(new Connectors.DiscordJS(client), nodes, {
     resume:              false,
-    reconnectTries:      360,   // 360 × 15s = 90 min de reintentos (espera cold start de Render)
+    reconnectTries:      360,   // 360 × 15s = 90 min de reintentos
     reconnectInterval:   15000,
     moveOnDisconnect:    false,
   });
