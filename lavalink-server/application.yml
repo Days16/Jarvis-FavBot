@@ -15,7 +15,6 @@ plugins:
     clients:
       - MUSIC
       - WEB
-      - ANDROID
       - IOS
       - ANDROID_VR
 
