@@ -205,13 +205,32 @@ export async function getOrCreatePlayer(guild, voiceChannelId) {
   return player;
 }
 
-export async function searchTracks(query) {
+export async function searchTracks(query, forcePlaylist = false) {
   if (!shoukaku) throw new Error('Lavalink no está configurado.');
   const node = [...shoukaku.nodes.values()][0];
   if (!node) throw new Error('No hay nodos Lavalink disponibles.');
 
   const isUrl = /^https?:\/\//i.test(query.trim());
-  const identifier = isUrl ? query.trim() : `ytsearch:${query}`;
+  let identifier;
+  if (isUrl) {
+    // Si la URL contiene &list= pero el usuario no pide playlist explícitamente,
+    // extraer solo el video (v=) para evitar cargar toda la playlist
+    if (!forcePlaylist && /[?&]list=/i.test(query)) {
+      try {
+        const u = new URL(query.trim());
+        const videoId = u.searchParams.get('v');
+        identifier = videoId
+          ? `https://www.youtube.com/watch?v=${videoId}`
+          : query.trim();
+      } catch {
+        identifier = query.trim();
+      }
+    } else {
+      identifier = query.trim();
+    }
+  } else {
+    identifier = `ytsearch:${query}`;
+  }
   return node.rest.resolve(identifier);
 }
 
