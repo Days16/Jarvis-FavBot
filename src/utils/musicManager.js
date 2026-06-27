@@ -83,11 +83,21 @@ function setupPlayerEvents(player, guildId) {
   });
 
   player.on('exception', data => {
-    logger.error(`[Lavalink] excepción en ${guildId}:`, data?.exception?.message ?? 'desconocido');
+    const rawMsg = data?.exception?.message ?? '';
+    logger.error(`[Lavalink] excepción en ${guildId}: ${rawMsg || 'desconocido'}`);
     const q = queues.get(guildId);
+    let friendlyMsg;
+    if (/requires.*(login|auth)/i.test(rawMsg) || /all clients failed/i.test(rawMsg)) {
+      friendlyMsg = '❌ Este vídeo no está disponible (requiere inicio de sesión en YouTube o está restringido).';
+    } else if (/not found|not available|private/i.test(rawMsg)) {
+      friendlyMsg = '❌ Vídeo no encontrado o no disponible.';
+    } else if (rawMsg) {
+      friendlyMsg = `❌ Error de reproducción: ${rawMsg}`;
+    } else {
+      friendlyMsg = '❌ Error desconocido al reproducir.';
+    }
     q?.textChannel?.send({
-      embeds: [new EmbedBuilder().setColor(0xed4245)
-        .setDescription(`❌ Error de reproducción: ${data?.exception?.message ?? 'desconocido'}`)],
+      embeds: [new EmbedBuilder().setColor(0xed4245).setDescription(friendlyMsg)],
     }).catch(() => {});
     if (!q) return;
     q.songs.shift();
