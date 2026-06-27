@@ -139,12 +139,13 @@ export default {
       const diag = getMusicDiagnostics();
       return interaction.reply({
         embeds: [new EmbedBuilder()
-          .setColor(diag.cookiesDetected ? 0x57f287 : 0xed4245)
-          .setTitle('Diagnostico de musica')
+          .setColor(0x57f287)
+          .setTitle('🔧 Diagnóstico de música')
           .addFields(
             { name: 'yt-dlp', value: `\`${diag.ytdlpBin}\``, inline: false },
-            { name: 'Cookies', value: diag.cookiesDetected ? 'Detectadas' : 'No detectadas', inline: true },
-            { name: 'Origen', value: `\`${diag.cookieSource}\``, inline: true },
+            { name: 'Cookies', value: diag.cookiesDetected ? `✅ Opcionales (${diag.cookieSource})` : '⚪ No configuradas (no necesarias)', inline: false },
+            { name: 'Estrategias yt-dlp', value: `${diag.clientStrategies?.length ?? '?'} player clients`, inline: true },
+            { name: 'Piped fallback', value: `${diag.pipedInstances ?? '?'} instancias`, inline: true },
           )],
         flags: 64,
       });

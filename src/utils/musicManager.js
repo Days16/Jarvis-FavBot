@@ -104,15 +104,26 @@ function buildYtDlpArgs(url, options = {}) {
   return args;
 }
 
+const YTDLP_TIMEOUT_MS = 12_000; // kill yt-dlp if it hangs longer than 12s
+
 function runYtDlpJson(url, options = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(YTDLP_BIN, buildYtDlpArgs(url, options), { windowsHide: true });
     let out = '';
     let err = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGKILL');
+      reject(new Error('yt-dlp timeout (12s)'));
+    }, YTDLP_TIMEOUT_MS);
 
     proc.stdout.on('data', d => { out += d; });
     proc.stderr.on('data', d => { err += d; });
     proc.on('close', code => {
+      clearTimeout(timer);
+      if (killed) return;
       if (code !== 0) {
         reject(new Error(err.trim() || out.trim() || `yt-dlp exit ${code}`));
         return;
@@ -123,7 +134,10 @@ function runYtDlpJson(url, options = {}) {
         reject(new Error(`yt-dlp JSON invalido: ${parseErr.message}`));
       }
     });
-    proc.on('error', reject);
+    proc.on('error', e => {
+      clearTimeout(timer);
+      if (!killed) reject(e);
+    });
   });
 }
 
@@ -145,9 +159,9 @@ async function runYtDlpWithRetry(url, options = {}) {
     }
   }
 
-  // Second pass: retry without cookies in case they're the problem
+  // Second pass: retry first 2 strategies without cookies (fast)
   if (COOKIES_PATH) {
-    for (const clients of CLIENT_STRATEGIES) {
+    for (const clients of CLIENT_STRATEGIES.slice(0, 2)) {
       try {
         const result = await runYtDlpJson(url, { ...options, playerClients: clients, useCookies: false });
         logger.debug(`[Music] yt-dlp OK sin cookies (client: ${clients})`);
@@ -395,14 +409,27 @@ async function ytDlpSearch(query) {
         const proc = spawn(YTDLP_BIN, args, { windowsHide: true });
         let out = '';
         let err = '';
+        let killed = false;
+
+        const timer = setTimeout(() => {
+          killed = true;
+          proc.kill('SIGKILL');
+          reject(new Error('yt-dlp search timeout (12s)'));
+        }, YTDLP_TIMEOUT_MS);
+
         proc.stdout.on('data', d => { out += d; });
         proc.stderr.on('data', d => { err += d; });
         proc.on('close', code => {
+          clearTimeout(timer);
+          if (killed) return;
           const url = out.trim().split('\n')[0];
           if (code === 0 && url.startsWith('http')) resolve(url);
           else reject(new Error(err.trim() || 'Sin resultados'));
         });
-        proc.on('error', reject);
+        proc.on('error', e => {
+          clearTimeout(timer);
+          if (!killed) reject(e);
+        });
       });
     } catch (e) {
       logger.debug(`[Music] Search ${clients}: ${e.message?.slice(0, 80)}`);
