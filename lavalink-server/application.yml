@@ -12,13 +12,12 @@ plugins:
       enabled: true
       # Tras autorizar por primera vez, añade el token como variable de entorno en Render
       refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
-      skipInitialization: false
     clients:
       - MUSIC
-      - ANDROID
-      - ANDROID_VR
-      - IOS
       - WEB
+      - ANDROID
+      - IOS
+      - ANDROID_VR
 
 lavalink:
   plugins:
