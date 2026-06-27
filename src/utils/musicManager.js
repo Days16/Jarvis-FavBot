@@ -21,6 +21,7 @@ function findYtDlpBin() {
 
 const YTDLP_BIN = findYtDlpBin();
 let cookieSource = 'none';
+const AUDIO_FORMAT = 'bestaudio[acodec!=none]/bestaudio/best[acodec!=none]/best';
 
 function materializeCookieContent(value, encoding) {
   if (!value) return null;
@@ -138,6 +139,16 @@ function normalizeYtDlpError(error) {
   return error;
 }
 
+function pickAudioURL(info) {
+  if (info?.url) return info.url;
+
+  const audioFormat = info?.formats
+    ?.filter(f => f?.url && f?.acodec && f.acodec !== 'none')
+    ?.sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0))[0];
+
+  return audioFormat?.url ?? null;
+}
+
 export function getMusicDiagnostics() {
   return {
     ytdlpBin: YTDLP_BIN,
@@ -190,9 +201,11 @@ function patchYtDlpPlugin(plugin) {
 
   plugin.getStreamURL = async function(song) {
     if (!song.url) throw new Error('URL de canción inválida.');
-    const info = await runYtDlpJson(song.url, { format: 'ba/ba*' }).catch(e => { throw normalizeYtDlpError(e); });
+    const info = await runYtDlpJson(song.url, { format: AUDIO_FORMAT }).catch(e => { throw normalizeYtDlpError(e); });
     if (Array.isArray(info.entries)) throw new Error('No se puede reproducir una playlist completa directamente.');
-    return info.url;
+    const streamURL = pickAudioURL(info);
+    if (!streamURL) throw new Error('No se encontro un formato de audio reproducible para este video.');
+    return streamURL;
   };
 }
 
