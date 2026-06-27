@@ -239,8 +239,7 @@ export async function searchTracks(query, forcePlaylist = false) {
       identifier = query.trim();
     }
   } else {
-    // ytmsearch usa YouTube Music API — menos restricciones de login que ytsearch para música
-    identifier = `ytmsearch:${query}`;
+    identifier = `scsearch:${query}`;
   }
   return node.rest.resolve(identifier);
 }
