@@ -29,7 +29,11 @@ async function getNodeConfig() {
   const port   = (await getConfig('lavalink_port').catch(() => null))   || process.env.LAVALINK_PORT   || '2333';
   const pass   = (await getConfig('lavalink_pass').catch(() => null))   || process.env.LAVALINK_PASS   || 'youshallnotpass';
   const secure = (await getConfig('lavalink_secure').catch(() => null)) || process.env.LAVALINK_SECURE || 'false';
-  return [{ name: 'main', url: `${host}:${port}`, auth: pass, secure: secure === 'true' }];
+  const isSecure = secure === 'true';
+  // Render rechaza WSS con puerto explícito cuando es el predeterminado (:443 para wss, :80 para ws)
+  const isDefaultPort = (isSecure && port === '443') || (!isSecure && port === '80');
+  const urlHost = isDefaultPort ? host : `${host}:${port}`;
+  return [{ name: 'main', url: urlHost, auth: pass, secure: isSecure }];
 }
 
 // ── Manejo de eventos del player ──────────────────────────────────────
@@ -119,7 +123,7 @@ async function awaitLavalinkReady(node, maxWaitMs = 120_000) {
     try {
       const res = await axios.get(url, { headers: { Authorization: node.auth }, timeout: 10_000 });
       if (res.status === 200) {
-        logger.info(`[Lavalink] Servidor responde (intento ${attempt + 1}): v${res.data?.version?.semver ?? '?'} ✓`);
+        logger.info(`[Lavalink] Servidor responde (intento ${attempt + 1}): v${res.data?.semver ?? res.data?.version?.semver ?? '?'} ✓`);
         return true;
       }
     } catch {
