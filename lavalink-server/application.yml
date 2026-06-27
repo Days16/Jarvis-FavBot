@@ -19,7 +19,7 @@ lavalink:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.11.5"
       repository: "https://maven.lavalink.dev/releases"
   server:
-    password: "${LAVALINK_PASS:youshallnotpass}"
+    password: "${LAVALINK_PASS:M1C0ntr4s3n4}"
     sources:
       youtube: false       # se usa el plugin de arriba
       soundcloud: true
