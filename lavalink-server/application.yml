@@ -14,11 +14,10 @@ plugins:
       refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
     clients:
       - MUSIC
+      - TV
       - MWEB
       - WEB
       - WEBEMBEDDED
-      - TV
-      - ANDROID_VR
 
 lavalink:
   plugins:
