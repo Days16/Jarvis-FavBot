@@ -117,9 +117,9 @@ export async function initMusic(client) {
   }
 
   shoukaku = new Shoukaku(new Connectors.DiscordJS(client), nodes, {
-    resume:              true,
-    reconnectTries:      3,
-    reconnectInterval:   5000,
+    resume:              false,
+    reconnectTries:      360,   // 360 × 15s = 90 min de reintentos (espera cold start de Render)
+    reconnectInterval:   15000,
     moveOnDisconnect:    false,
   });
 
@@ -131,10 +131,10 @@ export async function initMusic(client) {
   return shoukaku;
 }
 
-export function getShoukaku()          { return shoukaku; }
-export function getQueue(guildId)      { return queues.get(guildId) ?? null; }
-export function getPlayer(guildId)     { return shoukaku?.players.get(guildId) ?? null; }
-export function isLavalinkReady()      { return !!shoukaku; }
+export function getShoukaku()      { return shoukaku; }
+export function getQueue(guildId)  { return queues.get(guildId) ?? null; }
+export function getPlayer(guildId) { return shoukaku?.players.get(guildId) ?? null; }
+export function isLavalinkReady()  { return !!shoukaku && shoukaku.nodes.size > 0; }
 
 export function ensureQueue(guildId, textChannel, voiceChannelId) {
   if (!queues.has(guildId)) {
@@ -149,8 +149,7 @@ export async function getOrCreatePlayer(guild, voiceChannelId) {
   const existing = shoukaku.players.get(guild.id);
   if (existing) return existing;
 
-  const node = [...shoukaku.nodes.values()].find(n => n.stats != null)
-            ?? [...shoukaku.nodes.values()][0];
+  const node = [...shoukaku.nodes.values()][0];
   if (!node) throw new Error('No hay nodos Lavalink disponibles en este momento.');
 
   const player = await shoukaku.joinVoiceChannel({
@@ -165,8 +164,7 @@ export async function getOrCreatePlayer(guild, voiceChannelId) {
 
 export async function searchTracks(query) {
   if (!shoukaku) throw new Error('Lavalink no está configurado.');
-  const node = [...shoukaku.nodes.values()].find(n => n.stats != null)
-            ?? [...shoukaku.nodes.values()][0];
+  const node = [...shoukaku.nodes.values()][0];
   if (!node) throw new Error('No hay nodos Lavalink disponibles.');
 
   const isUrl = /^https?:\/\//i.test(query.trim());
