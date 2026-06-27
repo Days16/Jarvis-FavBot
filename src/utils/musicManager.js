@@ -147,9 +147,12 @@ export async function initMusic(client) {
   // Esperar a que Lavalink esté disponible (maneja cold-start de Render)
   await awaitLavalinkReady(nodes[0]);
 
-  shoukaku = new Shoukaku(new Connectors.DiscordJS(client), nodes, {
+  // Pasamos [] como nodes al constructor — shoukaku registra el listener de "clientReady"
+  // pero el evento ya disparó (initMusic se llama desde el handler de ready).
+  // Conectamos manualmente después de asignar el ID del bot.
+  shoukaku = new Shoukaku(new Connectors.DiscordJS(client), [], {
     resume:              false,
-    reconnectTries:      360,   // 360 × 15s = 90 min de reintentos
+    reconnectTries:      360,
     reconnectInterval:   15000,
     moveOnDisconnect:    false,
   });
@@ -161,6 +164,10 @@ export async function initMusic(client) {
     logger.warn(`[Lavalink] WS cerrado "${name}" → código ${code}${reason ? ` (${reason})` : ''}`),
   );
   shoukaku.on('debug',      (name, info)   => logger.debug(`[shoukaku/${name}] ${info}`));
+
+  // El bot ya está listo — conectar el nodo directamente sin esperar "clientReady"
+  shoukaku.id = client.user.id;
+  shoukaku.addNode(nodes[0]);
 
   const cfg = nodes[0];
   logger.info(`[Lavalink] Conectando a ${cfg.secure ? 'wss' : 'ws'}://${cfg.url} …`);
