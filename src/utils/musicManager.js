@@ -147,31 +147,40 @@ function runYtDlpJson(url, options = {}) {
  */
 async function runYtDlpWithRetry(url, options = {}) {
   let lastError;
+  const shortUrl = url.length > 60 ? url.slice(0, 60) + '...' : url;
+  logger.info(`[Music] ▶ runYtDlpWithRetry — ${shortUrl}`);
 
-  for (const clients of CLIENT_STRATEGIES) {
+  for (let i = 0; i < CLIENT_STRATEGIES.length; i++) {
+    const clients = CLIENT_STRATEGIES[i];
+    logger.info(`[Music]   Intento ${i + 1}/${CLIENT_STRATEGIES.length}: client=${clients}`);
     try {
       const result = await runYtDlpJson(url, { ...options, playerClients: clients });
-      logger.debug(`[Music] yt-dlp OK (client: ${clients})`);
+      logger.info(`[Music]   ✅ yt-dlp OK con client=${clients}`);
       return result;
     } catch (e) {
       lastError = e;
-      logger.debug(`[Music] yt-dlp ${clients}: ${e.message?.slice(0, 120)}`);
+      logger.warn(`[Music]   ❌ Fallo: ${e.message?.slice(0, 150)}`);
     }
   }
 
   // Second pass: retry first 2 strategies without cookies (fast)
   if (COOKIES_PATH) {
-    for (const clients of CLIENT_STRATEGIES.slice(0, 2)) {
+    logger.info('[Music]   🔄 Segunda ronda: sin cookies...');
+    for (let i = 0; i < 2; i++) {
+      const clients = CLIENT_STRATEGIES[i];
+      logger.info(`[Music]   Intento sin-cookies ${i + 1}/2: client=${clients}`);
       try {
         const result = await runYtDlpJson(url, { ...options, playerClients: clients, useCookies: false });
-        logger.debug(`[Music] yt-dlp OK sin cookies (client: ${clients})`);
+        logger.info(`[Music]   ✅ yt-dlp OK sin cookies con client=${clients}`);
         return result;
       } catch (e) {
         lastError = e;
+        logger.warn(`[Music]   ❌ Fallo sin cookies: ${e.message?.slice(0, 150)}`);
       }
     }
   }
 
+  logger.error(`[Music] ▶ runYtDlpWithRetry AGOTADA — todas las estrategias fallaron`);
   throw lastError;
 }
 
@@ -186,22 +195,30 @@ function extractVideoId(url) {
 }
 
 async function pipedExtractStream(videoId) {
-  for (const api of PIPED_INSTANCES) {
+  logger.info(`[Music] ▶ pipedExtractStream — videoId=${videoId}`);
+  for (let i = 0; i < PIPED_INSTANCES.length; i++) {
+    const api = PIPED_INSTANCES[i];
+    logger.info(`[Music]   Piped ${i + 1}/${PIPED_INSTANCES.length}: ${api}/streams/${videoId}`);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
       const res = await fetch(`${api}/streams/${videoId}`, { signal: controller.signal });
       clearTimeout(timeout);
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        logger.warn(`[Music]   ❌ Piped HTTP ${res.status}`);
+        continue;
+      }
       const data = await res.json();
+      const audioCount = data.audioStreams?.length ?? 0;
+      logger.info(`[Music]   Piped respondio: ${audioCount} audio streams`);
 
       const best = data.audioStreams
         ?.filter(s => s?.url)
         ?.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
 
       if (best?.url) {
-        logger.debug(`[Music] Piped OK via ${new URL(api).hostname}`);
+        logger.info(`[Music]   ✅ Piped OK — bitrate=${best.bitrate}, codec=${best.codec ?? '?'}`);
         return {
           url:         best.url,
           title:       data.title ?? 'Desconocido',
@@ -213,10 +230,12 @@ async function pipedExtractStream(videoId) {
           likes:       data.likes ?? 0,
         };
       }
+      logger.warn(`[Music]   ❌ Piped sin audio streams validos`);
     } catch (e) {
-      logger.debug(`[Music] Piped ${api}: ${e.message?.slice(0, 80)}`);
+      logger.warn(`[Music]   ❌ Piped error: ${e.message?.slice(0, 100)}`);
     }
   }
+  logger.error(`[Music] ▶ pipedExtractStream AGOTADA — ninguna instancia sirvio`);
   return null;
 }
 
@@ -303,6 +322,7 @@ function patchYtDlpPlugin(plugin) {
 
   // ── resolve: get video/playlist metadata ──
   plugin.resolve = async function(url, options) {
+    logger.info(`[Music] ════ RESOLVE ════ url=${url}`);
     let info;
 
     try {
@@ -315,6 +335,7 @@ function patchYtDlpPlugin(plugin) {
       if (videoId) {
         const piped = await pipedExtractStream(videoId);
         if (piped) {
+          logger.info(`[Music] ✅ RESOLVE via Piped — "${piped.title}"`);
           return new Song({
             plugin,
             source:         'youtube',
@@ -335,6 +356,7 @@ function patchYtDlpPlugin(plugin) {
         }
       }
 
+      logger.error('[Music] ❌ RESOLVE FALLO — ni yt-dlp ni Piped funcionaron');
       throw new Error(
         'No se pudo obtener info del video. YouTube puede estar bloqueando temporalmente — intenta de nuevo en unos minutos.',
       );
@@ -342,6 +364,7 @@ function patchYtDlpPlugin(plugin) {
 
     if (Array.isArray(info.entries)) {
       if (!info.entries.length) throw new Error('La playlist esta vacia.');
+      logger.info(`[Music] ✅ RESOLVE playlist — ${info.entries.length} canciones`);
       return new Playlist({
         source:    info.extractor,
         songs:     info.entries.map(i => makeSong(plugin, i, options)),
@@ -351,11 +374,13 @@ function patchYtDlpPlugin(plugin) {
         thumbnail: info.thumbnails?.[0]?.url ?? null,
       }, options);
     }
+    logger.info(`[Music] ✅ RESOLVE OK — "${info.title}"`);
     return makeSong(plugin, info, options);
   };
 
   // ── getStreamURL: get playable audio URL ──
   plugin.getStreamURL = async function(song) {
+    logger.info(`[Music] ════ GET STREAM URL ════ ${song.url}`);
     if (!song.url) throw new Error('URL de cancion invalida.');
 
     // Try yt-dlp with multiple strategies
@@ -363,19 +388,28 @@ function patchYtDlpPlugin(plugin) {
       const info = await runYtDlpWithRetry(song.url);
       if (!Array.isArray(info.entries)) {
         const streamURL = pickAudioURL(info);
-        if (streamURL) return streamURL;
+        if (streamURL) {
+          logger.info(`[Music] ✅ GET STREAM URL OK via yt-dlp`);
+          return streamURL;
+        }
+        logger.warn('[Music] yt-dlp devolvio info pero pickAudioURL no encontro audio');
       }
     } catch (e) {
-      logger.debug(`[Music] yt-dlp stream fallo: ${e.message?.slice(0, 100)}`);
+      logger.warn(`[Music] yt-dlp stream fallo: ${e.message?.slice(0, 150)}`);
     }
 
     // Fallback to Piped
+    logger.info('[Music] Intentando Piped para stream URL...');
     const videoId = extractVideoId(song.url);
     if (videoId) {
       const piped = await pipedExtractStream(videoId);
-      if (piped?.url) return piped.url;
+      if (piped?.url) {
+        logger.info(`[Music] ✅ GET STREAM URL OK via Piped`);
+        return piped.url;
+      }
     }
 
+    logger.error('[Music] ❌ GET STREAM URL FALLO — sin audio disponible');
     throw new Error('No se pudo obtener el audio. Intenta de nuevo en unos minutos.');
   };
 }
