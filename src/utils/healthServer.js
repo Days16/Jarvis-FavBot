@@ -28,9 +28,13 @@ export function startHealthServer() {
         axios.get(`${appUrl}/health`).catch(() => {});
         // Mantener despierto el servicio Lavalink en Render
         if (lavaHost) {
-          const proto = lavaSecure ? 'https' : 'http';
-          const port  = process.env.LAVALINK_PORT || '2333';
-          axios.get(`${proto}://${lavaHost}:${port}/version`).catch(() => {});
+          const proto     = lavaSecure ? 'https' : 'http';
+          const lavaPort  = process.env.LAVALINK_PORT || '2333';
+          const isDefault = (lavaSecure && lavaPort === '443') || (!lavaSecure && lavaPort === '80');
+          const lavalinkUrl = isDefault
+            ? `${proto}://${lavaHost}/version`
+            : `${proto}://${lavaHost}:${lavaPort}/version`;
+          axios.get(lavalinkUrl).catch(() => {});
         }
       }, PING_INTERVAL);
       logger.info(`Auto-ping activo → ${appUrl}/health cada 14 min`);

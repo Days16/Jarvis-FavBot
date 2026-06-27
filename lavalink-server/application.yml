@@ -10,12 +10,13 @@ plugins:
     allowDirectPlaylistIds: true
     oauth:
       enabled: true
-      # Tras autorizar por primera vez, añade el token como variable de entorno en Render
+      # Token guardado en Render como YOUTUBE_REFRESH_TOKEN
       refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
     clients:
       - MUSIC
       - WEB
-      - IOS
+      - TV_EMBEDDED
+      - TVHTML5EMBEDDED
       - ANDROID_VR
 
 lavalink:
