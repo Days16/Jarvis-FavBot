@@ -10,17 +10,30 @@ plugins:
     allowDirectPlaylistIds: true
     oauth:
       enabled: true
-      # Token guardado en Render como YOUTUBE_REFRESH_TOKEN
       refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
     clients:
+      - WEB
       - MUSIC
-      - TVHTML5SIMPLY
       - TV
       - IOS
+  lavasrc:
+    providers:
+      - 'ytsearch:"%ISRC%"'
+      - "ytsearch:%QUERY%"
+      - "scsearch:%QUERY%"
+    sources:
+      spotify:
+        clientId: "${SPOTIFY_CLIENT_ID:}"
+        clientSecret: "${SPOTIFY_CLIENT_SECRET:}"
+        countryCode: "US"
+        playlistLoadLimit: 6
+        albumLoadLimit: 2
 
 lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.3.0"
       repository: "https://maven.lavalink.dev/releases"
   server:
     password: "${LAVALINK_PASS:M1C0ntr4s3n4}"
