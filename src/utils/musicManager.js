@@ -7,8 +7,9 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { logger } from './logger.js';
 import ffmpegPath from 'ffmpeg-static';
+import axios from 'axios';
 
-// Disable TLS verification errors for public Piped API instances
+// Disable TLS verification errors for public proxy API instances
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // ─── yt-dlp binary detection ───────────────────────────────────────
@@ -24,27 +25,29 @@ function findYtDlpBin() {
 const YTDLP_BIN = findYtDlpBin();
 let cookieSource = 'none';
 
-// Player client strategies — ordered by reliability. 'default' uses yt-dlp standard settings.
+// Player client strategies — 'default' lets yt-dlp use its own best client.
 const CLIENT_STRATEGIES = [
   'default',
-  'ios,ios_creator',
-  'android_vr,tv_embedded',
-  'tv,web_creator',
-  'web_safari,mweb',
+  'android_vr',
 ];
 
 // Piped API instances (open-source YouTube proxy — no cookies needed)
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
-  'https://pipedapi.tokhmi.xyz',
   'https://pipedapi.moomoo.me',
-  'https://pipedapi.syncpundit.io',
-  'https://api-piped.mha.fi',
-  'https://piped-api.garudalinux.org',
-  'https://pipedapi.rivo.lol',
-  'https://api.piped.projectsegfault.com',
+  'https://pipedapi.leptons.xyz',
   'https://pipedapi.adminforge.de',
 ];
+
+// Invidious instances (fetched dynamically, these are hardcoded fallbacks)
+let invidiousInstances = [
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.f5.si',
+  'https://inv.zoomerville.com',
+  'https://invidious.tiekoetter.com',
+];
+let invidiousFetchedAt = 0;
 
 // ─── Optional cookie support (no longer required) ──────────────────
 function materializeCookieContent(value, encoding) {
@@ -159,39 +162,40 @@ function runYtDlpJson(url, options = {}) {
 async function runYtDlpWithRetry(url, options = {}) {
   let lastError;
   const shortUrl = url.length > 60 ? url.slice(0, 60) + '...' : url;
-  logger.info(`[Music] ▶ runYtDlpWithRetry — ${shortUrl}`);
+  logger.info(`[Music] \u25b6 runYtDlpWithRetry \u2014 ${shortUrl}`);
 
+  // === ROUND 1: Try WITHOUT cookies (bad cookies cause bot detection!) ===
   for (let i = 0; i < CLIENT_STRATEGIES.length; i++) {
     const clients = CLIENT_STRATEGIES[i];
-    logger.info(`[Music]   Intento ${i + 1}/${CLIENT_STRATEGIES.length}: client=${clients}`);
+    logger.info(`[Music]   Intento ${i + 1}/${CLIENT_STRATEGIES.length}: client=${clients} (sin cookies)`);
     try {
-      const result = await runYtDlpJson(url, { ...options, playerClients: clients });
-      logger.info(`[Music]   ✅ yt-dlp OK con client=${clients}`);
+      const result = await runYtDlpJson(url, { ...options, playerClients: clients, useCookies: false });
+      logger.info(`[Music]   \u2705 yt-dlp OK con client=${clients}`);
       return result;
     } catch (e) {
       lastError = e;
-      logger.warn(`[Music]   ❌ Fallo: ${e.message?.slice(0, 150)}`);
+      logger.warn(`[Music]   \u274c Fallo: ${e.message?.slice(0, 150)}`);
     }
   }
 
-  // Second pass: retry first 2 strategies without cookies (fast)
+  // === ROUND 2: Try WITH cookies if available (last resort) ===
   if (COOKIES_PATH) {
-    logger.info('[Music]   🔄 Segunda ronda: sin cookies...');
-    for (let i = 0; i < 2; i++) {
+    logger.info('[Music]   \ud83d\udd04 Ronda 2: CON cookies...');
+    for (let i = 0; i < CLIENT_STRATEGIES.length; i++) {
       const clients = CLIENT_STRATEGIES[i];
-      logger.info(`[Music]   Intento sin-cookies ${i + 1}/2: client=${clients}`);
+      logger.info(`[Music]   Intento con-cookies ${i + 1}/${CLIENT_STRATEGIES.length}: client=${clients}`);
       try {
-        const result = await runYtDlpJson(url, { ...options, playerClients: clients, useCookies: false });
-        logger.info(`[Music]   ✅ yt-dlp OK sin cookies con client=${clients}`);
+        const result = await runYtDlpJson(url, { ...options, playerClients: clients, useCookies: true });
+        logger.info(`[Music]   \u2705 yt-dlp OK con cookies, client=${clients}`);
         return result;
       } catch (e) {
         lastError = e;
-        logger.warn(`[Music]   ❌ Fallo sin cookies: ${e.message?.slice(0, 150)}`);
+        logger.warn(`[Music]   \u274c Fallo con cookies: ${e.message?.slice(0, 150)}`);
       }
     }
   }
 
-  logger.error(`[Music] ▶ runYtDlpWithRetry AGOTADA — todas las estrategias fallaron`);
+  logger.error(`[Music] \u25b6 runYtDlpWithRetry AGOTADA \u2014 todas las estrategias fallaron`);
   throw lastError;
 }
 
@@ -206,21 +210,20 @@ function extractVideoId(url) {
 }
 
 async function pipedExtractStream(videoId) {
-  logger.info(`[Music] ▶ pipedExtractStream — videoId=${videoId}`);
+  logger.info(`[Music] \u25b6 pipedExtractStream \u2014 videoId=${videoId}`);
   for (let i = 0; i < PIPED_INSTANCES.length; i++) {
     const api = PIPED_INSTANCES[i];
     logger.info(`[Music]   Piped ${i + 1}/${PIPED_INSTANCES.length}: ${api}/streams/${videoId}`);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(`${api}/streams/${videoId}`, { signal: controller.signal });
-      clearTimeout(timeout);
+      const res = await axios.get(`${api}/streams/${videoId}`, { timeout: 8000 });
+      const data = res.data;
 
-      if (!res.ok) {
-        logger.warn(`[Music]   ❌ Piped HTTP ${res.status}`);
+      // Verify we got JSON, not an HTML anti-bot page
+      if (typeof data !== 'object' || !data.audioStreams) {
+        logger.warn(`[Music]   \u274c Piped no devolvio JSON valido`);
         continue;
       }
-      const data = await res.json();
+
       const audioCount = data.audioStreams?.length ?? 0;
       logger.info(`[Music]   Piped respondio: ${audioCount} audio streams`);
 
@@ -229,7 +232,7 @@ async function pipedExtractStream(videoId) {
         ?.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
 
       if (best?.url) {
-        logger.info(`[Music]   ✅ Piped OK — bitrate=${best.bitrate}, codec=${best.codec ?? '?'}`);
+        logger.info(`[Music]   \u2705 Piped OK \u2014 bitrate=${best.bitrate}, codec=${best.codec ?? '?'}`);
         return {
           url:         best.url,
           title:       data.title ?? 'Desconocido',
@@ -241,12 +244,70 @@ async function pipedExtractStream(videoId) {
           likes:       data.likes ?? 0,
         };
       }
-      logger.warn(`[Music]   ❌ Piped sin audio streams validos`);
+      logger.warn(`[Music]   \u274c Piped sin audio streams validos`);
     } catch (e) {
-      logger.warn(`[Music]   ❌ Piped error: ${e.message?.slice(0, 100)}`);
+      const status = e.response?.status;
+      logger.warn(`[Music]   \u274c Piped error: ${status ? `HTTP ${status}` : e.message?.slice(0, 100)}`);
     }
   }
-  logger.error(`[Music] ▶ pipedExtractStream AGOTADA — ninguna instancia sirvio`);
+  logger.error(`[Music] \u25b6 pipedExtractStream AGOTADA`);
+  return null;
+}
+
+// \u2500\u2500\u2500 Invidious API fallback \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+async function refreshInvidiousInstances() {
+  if (Date.now() - invidiousFetchedAt < 30 * 60 * 1000) return; // cache 30min
+  try {
+    const res = await axios.get('https://api.invidious.io/instances.json', { timeout: 5000 });
+    const active = res.data
+      .filter(x => x[1]?.type === 'https' && x[1]?.monitor && !x[1]?.monitor?.down)
+      .map(x => x[1].uri);
+    if (active.length > 0) {
+      invidiousInstances = active;
+      invidiousFetchedAt = Date.now();
+      logger.info(`[Music] Invidious: ${active.length} instancias activas descubiertas`);
+    }
+  } catch (e) {
+    logger.warn(`[Music] No se pudo actualizar lista Invidious: ${e.message?.slice(0, 80)}`);
+  }
+}
+
+async function invidiousExtractStream(videoId) {
+  await refreshInvidiousInstances();
+  logger.info(`[Music] \u25b6 invidiousExtractStream \u2014 videoId=${videoId} (${invidiousInstances.length} instancias)`);
+  for (let i = 0; i < invidiousInstances.length; i++) {
+    const api = invidiousInstances[i];
+    try {
+      const res = await axios.get(`${api}/api/v1/videos/${videoId}`, {
+        timeout: 8000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      });
+      const data = res.data;
+      if (!data?.adaptiveFormats) continue;
+
+      const audioFormats = data.adaptiveFormats.filter(f => f.type?.startsWith('audio/'));
+      logger.info(`[Music]   Invidious ${i + 1}: ${audioFormats.length} audio formats`);
+
+      const best = audioFormats.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+      if (best?.url) {
+        logger.info(`[Music]   \u2705 Invidious OK via ${new URL(api).hostname}`);
+        return {
+          url:         best.url,
+          title:       data.title ?? 'Desconocido',
+          duration:    data.lengthSeconds ?? 0,
+          thumbnail:   data.videoThumbnails?.[0]?.url ?? null,
+          uploader:    data.author ?? null,
+          uploaderUrl: data.authorUrl ? `https://www.youtube.com${data.authorUrl}` : null,
+          views:       data.viewCount ?? 0,
+          likes:       data.likeCount ?? 0,
+        };
+      }
+    } catch (e) {
+      const status = e.response?.status;
+      logger.warn(`[Music]   \u274c Invidious ${new URL(api).hostname}: ${status ? `HTTP ${status}` : e.message?.slice(0, 60)}`);
+    }
+  }
+  logger.error(`[Music] \u25b6 invidiousExtractStream AGOTADA`);
   return null;
 }
 
@@ -339,14 +400,15 @@ function patchYtDlpPlugin(plugin) {
     try {
       info = await runYtDlpWithRetry(url);
     } catch (ytdlpErr) {
-      logger.warn('[Music] yt-dlp agoto todas las estrategias, intentando Piped...');
+      logger.warn('[Music] yt-dlp agoto todas las estrategias, intentando APIs proxy...');
 
-      // Fallback to Piped for YouTube URLs
+      // Fallback to Piped/Invidious for YouTube URLs
       const videoId = extractVideoId(url);
       if (videoId) {
+        // Try Piped first
         const piped = await pipedExtractStream(videoId);
         if (piped) {
-          logger.info(`[Music] ✅ RESOLVE via Piped — "${piped.title}"`);
+          logger.info(`[Music] \u2705 RESOLVE via Piped \u2014 "${piped.title}"`);
           return new Song({
             plugin,
             source:         'youtube',
@@ -365,11 +427,34 @@ function patchYtDlpPlugin(plugin) {
             ageRestricted:  false,
           }, options);
         }
+
+        // Try Invidious
+        const invidious = await invidiousExtractStream(videoId);
+        if (invidious) {
+          logger.info(`[Music] \u2705 RESOLVE via Invidious \u2014 "${invidious.title}"`);
+          return new Song({
+            plugin,
+            source:         'youtube',
+            playFromSource: true,
+            id:             videoId,
+            name:           invidious.title,
+            url,
+            isLive:         false,
+            thumbnail:      invidious.thumbnail,
+            duration:       invidious.duration,
+            uploader:       { name: invidious.uploader, url: invidious.uploaderUrl },
+            views:          invidious.views,
+            likes:          invidious.likes,
+            dislikes:       0,
+            reposts:        0,
+            ageRestricted:  false,
+          }, options);
+        }
       }
 
-      logger.error('[Music] ❌ RESOLVE FALLO — ni yt-dlp ni Piped funcionaron');
+      logger.error('[Music] \u274c RESOLVE FALLO \u2014 ni yt-dlp, ni Piped, ni Invidious funcionaron');
       throw new Error(
-        'No se pudo obtener info del video. YouTube puede estar bloqueando temporalmente — intenta de nuevo en unos minutos.',
+        'No se pudo obtener info del video. YouTube puede estar bloqueando temporalmente \u2014 intenta de nuevo en unos minutos.',
       );
     }
 
@@ -415,12 +500,20 @@ function patchYtDlpPlugin(plugin) {
     if (videoId) {
       const piped = await pipedExtractStream(videoId);
       if (piped?.url) {
-        logger.info(`[Music] ✅ GET STREAM URL OK via Piped`);
+        logger.info(`[Music] \u2705 GET STREAM URL OK via Piped`);
         return piped.url;
+      }
+
+      // Fallback to Invidious
+      logger.info('[Music] Intentando Invidious para stream URL...');
+      const invidious = await invidiousExtractStream(videoId);
+      if (invidious?.url) {
+        logger.info(`[Music] \u2705 GET STREAM URL OK via Invidious`);
+        return invidious.url;
       }
     }
 
-    logger.error('[Music] ❌ GET STREAM URL FALLO — sin audio disponible');
+    logger.error('[Music] \u274c GET STREAM URL FALLO \u2014 sin audio disponible');
     throw new Error('No se pudo obtener el audio. Intenta de nuevo en unos minutos.');
   };
 }
@@ -440,47 +533,42 @@ function cleanYouTubeURL(url) {
 
 // ─── Search / resolve query ────────────────────────────────────────
 async function ytDlpSearch(query) {
-  for (const clients of CLIENT_STRATEGIES) {
-    try {
-      return await new Promise((resolve, reject) => {
-        const args = [
-          `ytsearch1:${query}`,
-          '--print', 'webpage_url',
-          '--no-warnings',
-        ];
-        if (clients !== 'default') {
-          args.push('--extractor-args', `youtube:player_client=${clients}`);
-        }
-        if (COOKIES_PATH) args.push('--cookies', COOKIES_PATH);
+  // Try without cookies first (only 'default' strategy for speed)
+  try {
+    return await new Promise((resolve, reject) => {
+      const args = [
+        `ytsearch1:${query}`,
+        '--print', 'webpage_url',
+        '--no-warnings',
+      ];
 
-        const proc = spawn(YTDLP_BIN, args, { windowsHide: true });
-        let out = '';
-        let err = '';
-        let killed = false;
+      const proc = spawn(YTDLP_BIN, args, { windowsHide: true });
+      let out = '';
+      let err = '';
+      let killed = false;
 
-        const timer = setTimeout(() => {
-          killed = true;
-          proc.kill('SIGKILL');
-          reject(new Error('yt-dlp search timeout (12s)'));
-        }, YTDLP_TIMEOUT_MS);
+      const timer = setTimeout(() => {
+        killed = true;
+        proc.kill('SIGKILL');
+        reject(new Error('yt-dlp search timeout (12s)'));
+      }, YTDLP_TIMEOUT_MS);
 
-        proc.stdout.on('data', d => { out += d; });
-        proc.stderr.on('data', d => { err += d; });
-        proc.on('close', code => {
-          clearTimeout(timer);
-          if (killed) return;
-          const url = out.trim().split('\n')[0];
-          if (code === 0 && url.startsWith('http')) resolve(url);
-          else reject(new Error(err.trim() || 'Sin resultados'));
-        });
-        proc.on('error', e => {
-          clearTimeout(timer);
-          if (!killed) reject(e);
-        });
+      proc.stdout.on('data', d => { out += d; });
+      proc.stderr.on('data', d => { err += d; });
+      proc.on('close', code => {
+        clearTimeout(timer);
+        if (killed) return;
+        const url = out.trim().split('\n')[0];
+        if (code === 0 && url.startsWith('http')) resolve(url);
+        else reject(new Error(err.trim() || 'Sin resultados'));
       });
-    } catch (e) {
-      logger.debug(`[Music] Search ${clients}: ${e.message?.slice(0, 80)}`);
-    }
+      proc.on('error', e => {
+        clearTimeout(timer);
+        if (!killed) reject(e);
+      });
+    });
+  } catch (e) {
+    logger.info(`[Music] yt-dlp search fallo: ${e.message?.slice(0, 80)}`);
   }
 
   // Fallback: Piped search
