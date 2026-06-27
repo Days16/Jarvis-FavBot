@@ -11,6 +11,9 @@ plugins:
     oauth:
       enabled: true
       refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
+    pot:
+      token: "${YT_POT_TOKEN:}"
+      visitorData: "${YT_VISITOR_DATA:}"
     clients:
       - WEB
       - MUSIC
