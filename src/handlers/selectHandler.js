@@ -75,6 +75,62 @@ async function handleLevelRewardRemove(interaction) {
   });
 }
 
+// ── Music search pick ───────────────────────────────────────
+async function handleMusicPick(interaction, parts) {
+  // customId: music_pick:<guildId>:<userId>
+  const userId = parts[2];
+  if (interaction.user.id !== userId)
+    return interaction.reply({ embeds: [errorEmbed('Esta selección no es tuya.')], flags: 64 });
+
+  const {
+    pendingMusicSearches, getOrCreatePlayer, ensureQueue, formatDuration, isLavalinkReady,
+  } = await import('../utils/musicManager.js');
+
+  if (!isLavalinkReady())
+    return interaction.update({ embeds: [errorEmbed('Sistema de música no disponible.')], components: [] });
+
+  const key = `${interaction.guild.id}:${userId}`;
+  const pending = pendingMusicSearches.get(key);
+  if (!pending)
+    return interaction.update({ embeds: [errorEmbed('La búsqueda expiró. Vuelve a usar `/music play`.')], components: [] });
+
+  pendingMusicSearches.delete(key);
+
+  const idx = parseInt(interaction.values[0], 10);
+  const track = pending.tracks[idx];
+  if (!track)
+    return interaction.update({ embeds: [errorEmbed('Opción inválida.')], components: [] });
+
+  let player;
+  try { player = await getOrCreatePlayer(interaction.guild, pending.vcId); }
+  catch (err) { return interaction.update({ embeds: [errorEmbed(err.message)], components: [] }); }
+
+  const queue    = ensureQueue(interaction.guild.id, interaction.channel, pending.vcId);
+  const wasEmpty = queue.songs.length === 0;
+
+  queue.songs.push({ track, requestedBy: pending.requestedBy });
+
+  if (wasEmpty) {
+    await interaction.update({
+      embeds: [new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setDescription(`▶️ Reproduciendo **[${track.info.title}](${track.info.uri ?? '#'})**`)
+        .setThumbnail(track.info.artworkUrl ?? null)],
+      components: [],
+    });
+    await player.playTrack({ track: { encoded: track.encoded } });
+    player.setGlobalVolume(queue.volume);
+  } else {
+    await interaction.update({
+      embeds: [new EmbedBuilder()
+        .setColor(0x57f287)
+        .setDescription(`✅ **[${track.info.title}](${track.info.uri ?? '#'})** — posición **${queue.songs.length}**.`)
+        .setThumbnail(track.info.artworkUrl ?? null)],
+      components: [],
+    });
+  }
+}
+
 // ── Main dispatcher ─────────────────────────────────────────
 export async function handleSelect(interaction) {
   const id = interaction.customId;
@@ -84,6 +140,7 @@ export async function handleSelect(interaction) {
     if (parts[0] === 'rps') return await handleRolePanelSelect(interaction, parts);
     if (parts[0] === 'ticket_cat') return await handleTicketCategorySelect(interaction, parts);
     if (id === 'levelreward:remove') return await handleLevelRewardRemove(interaction);
+    if (parts[0] === 'music_pick') return await handleMusicPick(interaction, parts);
   } catch (e) {
     logger.error(`Error en select ${id}:`, e);
     const payload = { embeds: [errorEmbed('Error procesando la selección.')], flags: 64 };

@@ -21,9 +21,10 @@ plugins:
       - IOS
   lavasrc:
     providers:
+      - "scsearch:%QUERY%"
+      - 'scsearch:"%ISRC%"'
       - 'ytsearch:"%ISRC%"'
       - "ytsearch:%QUERY%"
-      - "scsearch:%QUERY%"
     sources:
       spotify:
         clientId: "${SPOTIFY_CLIENT_ID:}"

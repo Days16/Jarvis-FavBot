@@ -11,6 +11,10 @@ export const RepeatMode = Object.freeze({ NONE: 0, SONG: 1, QUEUE: 2 });
 const queues = new Map();
 let shoukaku = null;
 
+// Búsquedas pendientes de selección: key = `${guildId}:${userId}`
+// value = { tracks, vcId, requestedBy }
+export const pendingMusicSearches = new Map();
+
 // ── Utilidades ────────────────────────────────────────────────────────
 export function formatDuration(seconds) {
   if (!seconds || isNaN(seconds)) return '∞';
@@ -215,33 +219,63 @@ export async function getOrCreatePlayer(guild, voiceChannelId) {
   return player;
 }
 
+const YT_URL_RE = /(?:youtube\.com\/(?:watch|shorts)|youtu\.be\/)/i;
+const SPOTIFY_URL_RE = /open\.spotify\.com\//i;
+
+function extractYoutubeVideoId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0];
+    return u.searchParams.get('v') || u.pathname.split('/').pop() || null;
+  } catch { return null; }
+}
+
 export async function searchTracks(query, forcePlaylist = false) {
   if (!shoukaku) throw new Error('Lavalink no está configurado.');
   const node = [...shoukaku.nodes.values()][0];
   if (!node) throw new Error('No hay nodos Lavalink disponibles.');
 
-  const isUrl = /^https?:\/\//i.test(query.trim());
-  let identifier;
-  if (isUrl) {
-    // Si la URL contiene &list= pero el usuario no pide playlist explícitamente,
-    // extraer solo el video (v=) para evitar cargar toda la playlist
-    if (!forcePlaylist && /[?&]list=/i.test(query)) {
-      try {
-        const u = new URL(query.trim());
-        const videoId = u.searchParams.get('v');
-        identifier = videoId
-          ? `https://www.youtube.com/watch?v=${videoId}`
-          : query.trim();
-      } catch {
-        identifier = query.trim();
-      }
-    } else {
-      identifier = query.trim();
-    }
-  } else {
-    identifier = `scsearch:${query}`;
+  const trimmed = query.trim();
+  const isUrl = /^https?:\/\//i.test(trimmed);
+
+  if (!isUrl) {
+    return node.rest.resolve(`scsearch:${trimmed}`);
   }
-  return node.rest.resolve(identifier);
+
+  // Spotify URL → LavaSrc resuelve metadata → scsearch está primero en providers → SoundCloud
+  if (SPOTIFY_URL_RE.test(trimmed)) {
+    return node.rest.resolve(trimmed);
+  }
+
+  // YouTube URL → intentar; si falla por cipher/login, buscar por título en SoundCloud
+  if (YT_URL_RE.test(trimmed)) {
+    const videoId = extractYoutubeVideoId(trimmed);
+    let identifier = trimmed;
+    if (!forcePlaylist && /[?&]list=/i.test(trimmed) && videoId) {
+      identifier = `https://www.youtube.com/watch?v=${videoId}`;
+    }
+
+    const result = await node.rest.resolve(identifier);
+    if (!result || result.loadType === 'error' || result.loadType === 'empty') {
+      // YouTube falló (cipher/login en Render) → buscar en SoundCloud
+      const track = result?.data?.tracks?.[0];
+      const scQuery = track?.info?.title
+        ? `${track.info.author} ${track.info.title}`
+        : videoId || trimmed;
+      return node.rest.resolve(`scsearch:${scQuery}`);
+    }
+    return result;
+  }
+
+  // Otra URL (Bandcamp, SoundCloud directo, etc.)
+  if (!forcePlaylist && /[?&]list=/i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      const videoId = u.searchParams.get('v');
+      return node.rest.resolve(videoId ? `https://www.youtube.com/watch?v=${videoId}` : trimmed);
+    } catch { /* continúa */ }
+  }
+  return node.rest.resolve(trimmed);
 }
 
 export function destroyQueue(guildId) {

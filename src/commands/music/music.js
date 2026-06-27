@@ -1,9 +1,10 @@
-import { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits, StringSelectMenuBuilder, ActionRowBuilder } from 'discord.js';
 import { errorEmbed, successEmbed } from '../../utils/embedBuilder.js';
 import {
   getShoukaku, getQueue, getPlayer, getOrCreatePlayer,
   searchTracks, ensureQueue, destroyQueue,
   RepeatMode, formatDuration, isLavalinkReady,
+  pendingMusicSearches,
 } from '../../utils/musicManager.js';
 import { getGuild, ensureGuild, updateGuild } from '../../models/Guild.js';
 import { setConfig } from '../../models/BotConfig.js';
@@ -196,6 +197,37 @@ export default {
       if (result.loadType === 'error')
         return interaction.editReply({ embeds: [errorEmbed(`Error Lavalink: ${result.data?.message ?? 'desconocido'}`)] });
 
+      // Si la búsqueda devuelve múltiples resultados → mostrar selector
+      if (result.loadType === 'search' && result.data.length > 1) {
+        const tracks = result.data.slice(0, 5);
+        pendingMusicSearches.set(`${interaction.guild.id}:${interaction.user.id}`, {
+          tracks,
+          vcId: vc.id,
+          requestedBy: interaction.member,
+        });
+
+        const options = tracks.map((t, i) => ({
+          label: t.info.title.slice(0, 100),
+          description: `${t.info.author} · ${formatDuration(t.info.length / 1000)}`.slice(0, 100),
+          value: String(i),
+        }));
+
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId(`music_pick:${interaction.guild.id}:${interaction.user.id}`)
+          .setPlaceholder('Elige la canción…')
+          .addOptions(options);
+
+        return interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle('🎵 ¿Cuál de estas?')
+            .setDescription(tracks.map((t, i) =>
+              `**${i + 1}.** [${t.info.title}](${t.info.uri ?? '#'}) — \`${formatDuration(t.info.length / 1000)}\`\n└ ${t.info.author}`
+            ).join('\n\n'))],
+          components: [new ActionRowBuilder().addComponents(menu)],
+        });
+      }
+
       let player;
       try { player = await getOrCreatePlayer(interaction.guild, vc.id); }
       catch (err) { return interaction.editReply({ embeds: [errorEmbed(err.message)] }); }
@@ -210,6 +242,7 @@ export default {
           embeds: [new EmbedBuilder()
             .setColor(0x57f287)
             .setDescription(`✅ Playlist **${result.data.info.name}** — **${result.data.tracks.length}** canciones añadidas.`)],
+          components: [],
         });
       } else {
         const track = result.loadType === 'search' ? result.data[0] : result.data;
@@ -220,6 +253,7 @@ export default {
               .setColor(0x57f287)
               .setDescription(`✅ **[${track.info.title}](${track.info.uri ?? '#'})** — posición **${queue.songs.length}**.`)
               .setThumbnail(track.info.artworkUrl ?? null)],
+            components: [],
           });
         } else {
           await interaction.deleteReply().catch(() => {});
