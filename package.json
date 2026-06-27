@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
+    "@distube/soundcloud": "^2.0.4",
     "@distube/youtube": "latest",
     "@distube/yt-dlp": "^2.0.1",
     "@napi-rs/canvas": "^0.1.53",

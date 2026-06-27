@@ -1,7 +1,6 @@
 import express from 'express';
 import axios from 'axios';
 import { logger } from './logger.js';
-import { getMusicDiagnostics } from './musicManager.js';
 
 const PING_INTERVAL = 14 * 60 * 1000; // 14 min — por debajo del umbral de sleep de Render (15 min)
 
@@ -14,7 +13,6 @@ export function startHealthServer() {
     status: 'ok',
     uptime: Math.floor(process.uptime()),
     memory: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
-    music: getMusicDiagnostics(),
   }));
 
   app.get('/', (_, res) => res.json({ name: 'Jarvis-FavBot', status: 'online' }));

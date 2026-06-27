@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
 import { RepeatMode } from 'distube';
 import { errorEmbed, successEmbed } from '../../utils/embedBuilder.js';
-import { getDistube, getMusicDiagnostics, resolvePlayQuery } from '../../utils/musicManager.js';
+import { getDistube, resolvePlayQuery } from '../../utils/musicManager.js';
 import { getGuild, ensureGuild, updateGuild } from '../../models/Guild.js';
 
 function formatDuration(seconds) {
@@ -136,16 +136,14 @@ export default {
 
     // ── comprobación de canal de texto ────────────────────────
     if (sub === 'diagnostico') {
-      const diag = getMusicDiagnostics();
       return interaction.reply({
         embeds: [new EmbedBuilder()
           .setColor(0x57f287)
           .setTitle('🔧 Diagnóstico de música')
           .addFields(
-            { name: 'yt-dlp', value: `\`${diag.ytdlpBin}\``, inline: false },
-            { name: 'Cookies', value: diag.cookiesDetected ? `✅ Opcionales (${diag.cookieSource})` : '⚪ No configuradas (no necesarias)', inline: false },
-            { name: 'Estrategias yt-dlp', value: `${diag.clientStrategies?.length ?? '?'} player clients`, inline: true },
-            { name: 'Piped fallback', value: `${diag.pipedInstances ?? '?'} instancias`, inline: true },
+            { name: 'Fuente YouTube', value: '✅ cobalt.tools (sin bloqueo de IP)', inline: false },
+            { name: 'Búsqueda de texto', value: '✅ SoundCloud (funciona en servidores cloud)', inline: false },
+            { name: 'Fallback', value: 'yt-dlp local (URLs no YouTube)', inline: false },
           )],
         flags: 64,
       });
@@ -184,17 +182,20 @@ export default {
         embeds: [new EmbedBuilder().setColor(0x5865f2).setDescription(`🔍 Buscando **${raw}**…`)],
       });
 
-      let url;
+      // resolvePlayQuery devuelve: URL (YouTube/SC/otra) o null (texto → SoundCloud lo busca)
+      let playTarget;
       try {
-        url = await resolvePlayQuery(raw);
+        playTarget = await resolvePlayQuery(raw);
       } catch (err) {
         return interaction.editReply({ embeds: [errorEmbed(`No se encontró ninguna canción para **${raw}**.`)] });
       }
+      // Si es null, pasamos el texto directamente — SoundCloudPlugin lo resuelve
+      if (playTarget === null) playTarget = raw;
 
       const TIMEOUT = 45_000;
       try {
         await Promise.race([
-          distube.play(vc, url, { member: interaction.member, textChannel: interaction.channel }),
+          distube.play(vc, playTarget, { member: interaction.member, textChannel: interaction.channel }),
           new Promise((_, rej) => setTimeout(() => rej(new Error('Tiempo de espera agotado (45s). Intenta de nuevo.')), TIMEOUT)),
         ]);
         await interaction.deleteReply().catch(() => {});
@@ -281,7 +282,8 @@ export default {
 
     // ── nowplaying ────────────────────────────────────────────
     if (sub === 'nowplaying') {
-      const song = queue.songs[0];
+      const song = queue.songs?.[0];
+      if (!song) return interaction.reply({ embeds: [errorEmbed('No hay canción reproduciéndose.')], flags: 64 });
       const current = queue.currentTime ?? 0;
       const bar = progressBar(current, song.duration ?? 0);
       const requestedBy = song.user ?? song.requestedBy;
