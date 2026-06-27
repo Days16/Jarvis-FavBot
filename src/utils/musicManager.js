@@ -123,11 +123,16 @@ export async function initMusic(client) {
     moveOnDisconnect:    false,
   });
 
-  shoukaku.on('ready',      name      => logger.success(`[Lavalink] Nodo "${name}" conectado ✓`));
-  shoukaku.on('error',      (name, e) => logger.error(`[Lavalink] Error en "${name}": ${e?.message}`));
-  shoukaku.on('disconnect', name      => logger.warn(`[Lavalink] Nodo "${name}" desconectado`));
+  shoukaku.on('ready',      name           => logger.success(`[Lavalink] Nodo "${name}" conectado ✓`));
+  shoukaku.on('error',      (name, e)      => logger.error(`[Lavalink] Error en "${name}": ${e?.message ?? e}`));
+  shoukaku.on('disconnect', (name, count)  => logger.warn(`[Lavalink] Nodo "${name}" desconectado (intento ${count})`));
+  shoukaku.on('close',      (name, code, reason) =>
+    logger.warn(`[Lavalink] WS cerrado "${name}" → código ${code}${reason ? ` (${reason})` : ''}`),
+  );
+  shoukaku.on('debug',      (name, info)   => logger.debug(`[shoukaku/${name}] ${info}`));
 
-  logger.info('Sistema de música inicializado (Lavalink/shoukaku).');
+  const cfg = nodes[0];
+  logger.info(`[Lavalink] Conectando a ${cfg.secure ? 'wss' : 'ws'}://${cfg.url} …`);
   return shoukaku;
 }
 
