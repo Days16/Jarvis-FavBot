@@ -8,6 +8,11 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
+    oauth:
+      enabled: true
+      # Tras autorizar por primera vez, añade el token como variable de entorno en Render
+      refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
+      skipInitialization: false
     clients:
       - MUSIC
       - ANDROID
