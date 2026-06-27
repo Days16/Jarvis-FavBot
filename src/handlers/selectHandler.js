@@ -108,7 +108,8 @@ async function handleMusicPick(interaction, parts) {
   const queue    = ensureQueue(interaction.guild.id, interaction.channel, pending.vcId);
   const wasEmpty = queue.songs.length === 0;
 
-  queue.songs.push({ track, requestedBy: pending.requestedBy });
+  const altTracks = pending.tracks.filter((_, i) => i !== idx);
+  queue.songs.push({ track, requestedBy: pending.requestedBy, _altTracks: altTracks, _altIdx: 0 });
 
   if (wasEmpty) {
     await interaction.update({

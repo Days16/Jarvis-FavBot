@@ -245,8 +245,11 @@ export default {
           components: [],
         });
       } else {
-        const track = result.loadType === 'search' ? result.data[0] : result.data;
-        queue.songs.push({ track, requestedBy: interaction.member });
+        const isSearch = result.loadType === 'search';
+        const track = isSearch ? result.data[0] : result.data;
+        // Guardar resultados alternativos para auto-retry si el stream de SoundCloud falla
+        const altTracks = isSearch ? result.data.slice(1) : [];
+        queue.songs.push({ track, requestedBy: interaction.member, _altTracks: altTracks, _altIdx: 0 });
         if (!wasEmpty) {
           await interaction.editReply({
             embeds: [new EmbedBuilder()

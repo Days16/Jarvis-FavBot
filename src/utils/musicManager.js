@@ -86,24 +86,49 @@ function setupPlayerEvents(player, guildId) {
     }
   });
 
-  player.on('exception', data => {
+  player.on('exception', async data => {
     const rawMsg = data?.exception?.message ?? '';
     logger.error(`[Lavalink] excepción en ${guildId}: ${rawMsg || 'desconocido'}`);
     const q = queues.get(guildId);
-    let friendlyMsg;
-    if (/requires.*(login|auth)/i.test(rawMsg) || /all clients failed/i.test(rawMsg)) {
-      friendlyMsg = '❌ Este vídeo no está disponible (requiere inicio de sesión en YouTube o está restringido).';
-    } else if (/not found|not available|private/i.test(rawMsg)) {
-      friendlyMsg = '❌ Vídeo no encontrado o no disponible.';
-    } else if (rawMsg) {
-      friendlyMsg = `❌ Error de reproducción: ${rawMsg}`;
-    } else {
-      friendlyMsg = '❌ Error desconocido al reproducir.';
-    }
-    q?.textChannel?.send({
-      embeds: [new EmbedBuilder().setColor(0xed4245).setDescription(friendlyMsg)],
-    }).catch(() => {});
     if (!q) return;
+
+    const failedSong = q.songs[0];
+
+    // SoundCloud 404 → intentar track alternativo antes de rendirse
+    const isSoundCloud404 = /invalid status code for soundcloud/i.test(rawMsg) || /soundcloud.*404/i.test(rawMsg);
+    if (isSoundCloud404 && failedSong) {
+      const altTracks = failedSong._altTracks ?? [];
+      const altIdx    = failedSong._altIdx ?? 0;
+      if (altIdx < altTracks.length) {
+        const next = altTracks[altIdx];
+        q.songs[0] = { ...failedSong, track: next, _altIdx: altIdx + 1 };
+        logger.info(`[Lavalink] SoundCloud 404 — reintentando con alternativo ${altIdx + 1}/${altTracks.length}`);
+        q.textChannel?.send({
+          embeds: [new EmbedBuilder().setColor(0xfee75c).setDescription(`⚠️ El stream falló, probando resultado alternativo ${altIdx + 1}…`)],
+        }).catch(() => {});
+        player.playTrack({ track: { encoded: next.encoded } }).catch(() => {});
+        return;
+      }
+      // Agotados los alternativos
+      q.textChannel?.send({
+        embeds: [new EmbedBuilder().setColor(0xed4245).setDescription('❌ SoundCloud no pudo reproducir ningún resultado para esta búsqueda. Prueba con otro nombre.')],
+      }).catch(() => {});
+    } else {
+      let friendlyMsg;
+      if (/requires.*(login|auth)/i.test(rawMsg) || /all clients failed/i.test(rawMsg)) {
+        friendlyMsg = '❌ Este vídeo no está disponible (requiere inicio de sesión o está restringido).';
+      } else if (/not found|not available|private/i.test(rawMsg)) {
+        friendlyMsg = '❌ Vídeo no encontrado o no disponible.';
+      } else if (rawMsg) {
+        friendlyMsg = `❌ Error de reproducción: ${rawMsg}`;
+      } else {
+        friendlyMsg = '❌ Error desconocido al reproducir.';
+      }
+      q.textChannel?.send({
+        embeds: [new EmbedBuilder().setColor(0xed4245).setDescription(friendlyMsg)],
+      }).catch(() => {});
+    }
+
     q.songs.shift();
     if (q.songs.length > 0) {
       player.playTrack({ track: { encoded: q.songs[0].track.encoded } }).catch(() => {});
