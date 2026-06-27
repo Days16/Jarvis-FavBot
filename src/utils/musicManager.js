@@ -8,6 +8,9 @@ import { tmpdir } from 'os';
 import { logger } from './logger.js';
 import ffmpegPath from 'ffmpeg-static';
 
+// Disable TLS verification errors for public Piped API instances
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // ─── yt-dlp binary detection ───────────────────────────────────────
 function findYtDlpBin() {
   if (process.env.YTDLP_PATH) return process.env.YTDLP_PATH;
@@ -21,8 +24,9 @@ function findYtDlpBin() {
 const YTDLP_BIN = findYtDlpBin();
 let cookieSource = 'none';
 
-// Player client strategies — ordered by reliability without cookies
+// Player client strategies — ordered by reliability. 'default' uses yt-dlp standard settings.
 const CLIENT_STRATEGIES = [
+  'default',
   'ios,ios_creator',
   'android_vr,tv_embedded',
   'tv,web_creator',
@@ -32,8 +36,14 @@ const CLIENT_STRATEGIES = [
 // Piped API instances (open-source YouTube proxy — no cookies needed)
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
-  'https://pipedapi.adminforge.de',
+  'https://pipedapi.tokhmi.xyz',
+  'https://pipedapi.moomoo.me',
+  'https://pipedapi.syncpundit.io',
+  'https://api-piped.mha.fi',
+  'https://piped-api.garudalinux.org',
+  'https://pipedapi.rivo.lol',
   'https://api.piped.projectsegfault.com',
+  'https://pipedapi.adminforge.de',
 ];
 
 // ─── Optional cookie support (no longer required) ──────────────────
@@ -91,12 +101,13 @@ function buildYtDlpArgs(url, options = {}) {
     url,
     '--dump-single-json',
     '--no-warnings',
-    '--prefer-free-formats',
     '--skip-download',
     '--simulate',
-    '--extractor-args',
-    `youtube:player_client=${clients}`,
   ];
+
+  if (clients !== 'default') {
+    args.push('--extractor-args', `youtube:player_client=${clients}`);
+  }
 
   if (options.format) args.push('--format', options.format);
   if (options.useCookies !== false && COOKIES_PATH) args.push('--cookies', COOKIES_PATH);
@@ -436,8 +447,10 @@ async function ytDlpSearch(query) {
           `ytsearch1:${query}`,
           '--print', 'webpage_url',
           '--no-warnings',
-          '--extractor-args', `youtube:player_client=${clients}`,
         ];
+        if (clients !== 'default') {
+          args.push('--extractor-args', `youtube:player_client=${clients}`);
+        }
         if (COOKIES_PATH) args.push('--cookies', COOKIES_PATH);
 
         const proc = spawn(YTDLP_BIN, args, { windowsHide: true });
