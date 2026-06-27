@@ -1,0 +1,49 @@
+server:
+  port: ${PORT:2333}
+  address: 0.0.0.0
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - TV_EMBEDDED
+      - WEB
+
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.11.5"
+      repository: "https://maven.lavalink.dev/releases"
+  server:
+    password: "${LAVALINK_PASS:youshallnotpass}"
+    sources:
+      youtube: false       # se usa el plugin de arriba
+      soundcloud: true
+      bandcamp: true
+      twitch: true
+      http: true
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      rotation: true
+      distortion: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO
