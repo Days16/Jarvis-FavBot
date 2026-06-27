@@ -15,8 +15,8 @@ plugins:
     clients:
       - MUSIC
       - WEB
-      - TV_EMBEDDED
-      - TVHTML5EMBEDDED
+      - TV
+      - IOS
       - ANDROID_VR
 
 lavalink:
